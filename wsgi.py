@@ -31,7 +31,7 @@ def load_user(user_id):
 
 
 # Configure the upload folder
-app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif'}
 
 
@@ -47,10 +47,10 @@ class User(UserMixin, db.Model):
     password = db.Column(db.String(90), nullable=False)
     scheduled_task = db.relationship("Schedule", backref="user", lazy=True)
 
-    def setpassword(self, password:str) -> None:
+    def setpassword(self, password: str) -> None:
         self.password = crypt.generate_password_hash(password)
 
-    def verify_password(self, password:str) -> bool:
+    def verify_password(self, password: str) -> bool:
         return crypt.check_password_hash(self.password, password)
 
     def __init__(self, email, password):
@@ -72,7 +72,7 @@ class Schedule(db.Model):
 
     text = db.relationship("ImageText", backref="task", lazy=True)
 
-    def __init__(self, user:User, image:str, scheduleTo:datetime):
+    def __init__(self, user: User, image: str, scheduleTo: datetime):
         self.scheduleTo = scheduleTo
         self.email = user.email
         self.image = image
@@ -89,7 +89,6 @@ class ImageText(db.Model):
     text = db.Column(db.Text, nullable=False)
 
 
-# Function to check if the file extension is allowed
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
@@ -98,6 +97,15 @@ def allowed_file(filename):
 @login_required
 def index():
     return render_template('index.html')
+
+
+@app.route("/getTasks")
+@login_required
+def get_tasks():
+    tasks = current_user.scheduled_tasks.paginate(page, items_per_page, error_out=False)
+    data = [
+        for task in tasks.has_next
+    ]
 
 
 @app.route('/register', methods=['GET'])
@@ -110,7 +118,7 @@ def post_user():
     email = request.form.get("email")
     password = request.form.get("password")
 
-    user = User.query.filter(User.email==email).first()
+    user = User.query.filter(User.email == email).first()
     if user is None:
         user = User(email=email, password=password)
         db.session.add(user)
@@ -132,7 +140,7 @@ def auth():
     email = request.form.get("email")
     password = request.form.get("password")
 
-    user = User.query.filter(User.email==email).first()
+    user = User.query.filter(User.email == email).first()
     if user is not None and user.verify_password(password):
         login_user(user)
         flash(message="Successfully Logged in!", category='success')
@@ -142,25 +150,27 @@ def auth():
         return redirect('login')
 
 
-@app.route('/upload', methods=['GET', 'POST'])
+@app.route('/upload', methods=['POST'])
+@login_required
 def upload_file():
     if request.method == 'POST':
-        # Check if the post request has the file part
-        if 'file' not in request.files:
+        if 'media' not in request.files:
             return 'No file selected'
 
-        file = request.files['file']
+        file = request.files['media']
 
-        # Validate the file
         if file.filename == '':
             return 'No file selected'
         if not allowed_file(file.filename):
             return 'Invalid file type'
 
-        # Save the file
         filename = secure_filename(file.filename)
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
-        return 'File uploaded successfully'
+        schedule_to = request.form.get("schedule_to")
+        schedule_to = datetime.strptime(schedule_to, "%Y-%m-%dT%H:%M")
+        schedule = Schedule(user=current_user, scheduleTo=schedule_to, image=filename)
+        db.session.add(schedule)
+        db.session.commit()
 
-    return render_template('upload.html')
+        return redirect(url_for('index'))
