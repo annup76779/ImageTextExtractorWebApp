@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from flask import Flask, request, render_template, redirect, flash, url_for
+from flask import Flask, request, render_template, redirect, flash, url_for, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from werkzeug.utils import secure_filename
 from flask_sqlalchemy import SQLAlchemy
@@ -45,7 +45,7 @@ class User(UserMixin, db.Model):
 
     email = db.Column(db.String(255), primary_key=True)
     password = db.Column(db.String(90), nullable=False)
-    scheduled_task = db.relationship("Schedule", backref="user", lazy=True)
+    scheduled_task = db.relationship("Schedule", backref="user", lazy='dynamic')
 
     def setpassword(self, password: str) -> None:
         self.password = crypt.generate_password_hash(password)
@@ -99,13 +99,28 @@ def index():
     return render_template('index.html')
 
 
-@app.route("/getTasks")
+@app.route("/getTasks", methods=["POST"])
 @login_required
 def get_tasks():
-    tasks = current_user.scheduled_tasks.paginate(page, items_per_page, error_out=False)
-    data = [
-        for task in tasks.has_next
+    draw = request.form.get('draw')
+    row = int(request.form.get("start", 1))
+    rowperpage = int(request.form.get("length", 2))
+    tasks = current_user.scheduled_task.paginate(page=row/rowperpage, per_page=rowperpage, error_out=False)
+    data = [(
+        task.id,
+        "<a href='%s' target=_blank>View Image</a>" % ("/static/%s" % task.image,)
+        , task.scheduleTo.strftime("%b %m, %Y %H:%M"), task.date_on.strftime("%b %m, %Y %H:%M")
+    )
+        for task in tasks.items
     ]
+    response = {
+        "draw": int(draw),
+        "recordsTotal": tasks.total,
+        "recordsFiltered": tasks.total,
+        "aaData": data,
+    }
+
+    return jsonify(**response)
 
 
 @app.route('/register', methods=['GET'])

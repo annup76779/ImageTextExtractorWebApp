@@ -63,13 +63,9 @@
                     <thead>
                         <tr>
                             <th>Sr No.</th>
-                            <th>Order ID</th>
-                            <th>Customer Name</th>
-                            <th>Order Date</th>
-                            <th>Executive</th>
-                            <th>Order Value</th>
-                            <th>Status</th>
-                            <th>View PO</th>
+                            <th>Image</th>
+                            <th>Schedule To</th>
+                            <th>Date</th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
@@ -94,7 +90,7 @@
         "serverMethod": 'post',
         paging: true,
         "ajax": {
-            'url': "/getData",
+            'url': "/getTasks",
         },
         bDestroy: true,
         'searching': false,
