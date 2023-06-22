@@ -1,4 +1,6 @@
+import threading
 from datetime import datetime, timedelta
+from time import sleep
 
 from flask import Flask, request, render_template, redirect, flash, url_for, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
@@ -8,6 +10,8 @@ from flask_bcrypt import Bcrypt
 from flask_migrate import Migrate
 import os
 import pytz
+
+from textExtractor import extract_text_from_image
 
 # ####################
 # configuration       |
@@ -76,10 +80,10 @@ class Schedule(db.Model):
         self.scheduleTo = scheduleTo
         self.email = user.email
         self.image = image
-        self.date_on = datetime.now()
+        self.date_on = datetime.now(tz=pytz.timezone("Asia/Kolkata"))
 
     def isExtracted(self):
-        return self.scheduleTo - datetime.now() > timedelta(microseconds=0)
+        return self.scheduleTo - datetime.now() <= timedelta(days=0, seconds=0, microseconds=0)
 
 
 class ImageText(db.Model):
@@ -87,6 +91,10 @@ class ImageText(db.Model):
 
     task_id = db.Column(db.Integer, db.ForeignKey("schedule.id"), primary_key=True)
     text = db.Column(db.Text, nullable=False)
+
+    def __init__(self, task: Schedule, text: str):
+        self.task_id = task.id
+        self.text = str(text)
 
 
 def allowed_file(filename):
@@ -109,7 +117,10 @@ def get_tasks():
     data = [(
         task.id,
         "<a href='%s' target=_blank>View Image</a>" % ("/static/%s" % task.image,)
-        , task.scheduleTo.strftime("%b %m, %Y %H:%M"), task.date_on.strftime("%b %m, %Y %H:%M")
+        , task.scheduleTo.strftime("%b %d, %Y %H:%M"),
+        ImageText.query.get(task.id).text[:40] + ' ' + "<a href='/getText?id=%s' target='_blank'>full text</a>"%task.id \
+            if task.isExtracted() and task.text else "-- --",
+        task.date_on.strftime("%b %d, %Y %H:%M")
     )
         for task in tasks.items
     ]
@@ -121,6 +132,17 @@ def get_tasks():
     }
 
     return jsonify(**response)
+
+
+@app.route("/getText", methods=["GET"])
+@login_required
+def getText():
+    id_ = request.args.get("id")
+    obj = ImageText.query.get(int(id_))
+    if obj:
+        return obj.text.replace("\n", "<br>")
+    else:
+        return " -- --"
 
 
 @app.route('/register', methods=['GET'])
@@ -165,6 +187,19 @@ def auth():
         return redirect('login')
 
 
+def run_extraction_thread(id, image_path):
+    with app.app_context():
+        schedule = Schedule.query.filter_by(id=id).first()
+        while not schedule.isExtracted():
+            sleep(1)
+        text = extract_text_from_image(image_path)
+        text = text if text else ' -- -- '
+        obj = ImageText(schedule, text)
+        db.session.add(obj)
+        db.session.commit()
+        return True
+
+
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload_file():
@@ -187,5 +222,9 @@ def upload_file():
         schedule = Schedule(user=current_user, scheduleTo=schedule_to, image=filename)
         db.session.add(schedule)
         db.session.commit()
+
+        # run thread
+        extraction_thread = threading.Thread(target=run_extraction_thread, args=(schedule.id, os.path.join(app.config['UPLOAD_FOLDER'], filename)))
+        extraction_thread.start()
 
         return redirect(url_for('index'))
